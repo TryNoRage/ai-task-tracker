@@ -9,11 +9,9 @@ const MODEL = "whisper-1";
 const LANGUAGE = "uk";
 const MAX_BYTES = 25 * 1024 * 1024;
 
-// Підказка для Whisper: задає очікувану лексику/стиль і знижує кількість
-// галюцинацій на коротких/шумних записах. Не транскрибується дослівно —
-// лише зміщує імовірності токенів.
-const PROMPT =
-  "Це коротка україномовна нотатка-задача. Можуть бути імена, дати (сьогодні, завтра, у пʼятницю, до обіду), час (о 14:00), пріоритети (терміново, важливо), згадки про дзвінки, листи, зустрічі, дедлайни.";
+// Whisper prompt має бути в стилі попередньої транскрипції, а не опису.
+// Тримаємо коротко — лише задає мову/стиль та кілька доменних слів.
+const PROMPT = "Україномовна нотатка-задача: завтра, до обіду, терміново.";
 
 const HALLUCINATIONS = new Set(
   [
@@ -87,7 +85,15 @@ export async function POST(req: Request) {
       response_format: "json",
     });
 
-    return NextResponse.json({ text: sanitizeTranscript(tr.text ?? "") });
+    const raw = tr.text ?? "";
+    const cleaned = sanitizeTranscript(raw);
+    console.log(
+      `[transcribe] mime=${file.type} size=${file.size}B raw=${JSON.stringify(
+        raw
+      )} cleaned=${JSON.stringify(cleaned)}`
+    );
+
+    return NextResponse.json({ text: cleaned });
   } catch (err) {
     console.error("[POST /api/transcribe]", err);
     return NextResponse.json(
