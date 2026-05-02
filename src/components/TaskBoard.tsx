@@ -5,11 +5,13 @@ import { TaskInput } from "./TaskInput";
 import { TaskCard } from "./TaskCard";
 import {
   TaskControls,
+  type CategoryFilter,
   type FilterValue,
   type SortValue,
 } from "./TaskControls";
-import { RecommendPanel } from "./RecommendPanel";
-import type { Task } from "@/lib/types";
+import { DigestPanel } from "./DigestPanel";
+import { CATEGORIES, type CategoryValue } from "@/lib/categories";
+import type { Comment, Task } from "@/lib/types";
 
 interface Props {
   initial: Task[];
@@ -19,6 +21,7 @@ const PRIORITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
 const FILTER_KEY = "tt:filter";
 const SORT_KEY = "tt:sort";
+const CATEGORY_KEY = "tt:cat";
 
 const FILTER_VALUES: ReadonlyArray<FilterValue> = ["all", "active", "done"];
 const SORT_VALUES: ReadonlyArray<SortValue> = [
@@ -28,12 +31,24 @@ const SORT_VALUES: ReadonlyArray<SortValue> = [
   "newest",
 ];
 
+const CATEGORY_VALUES: ReadonlyArray<CategoryFilter> = [
+  "all",
+  "work",
+  "personal",
+  "study",
+  "other",
+];
+
 function isFilter(v: string | null): v is FilterValue {
   return !!v && (FILTER_VALUES as ReadonlyArray<string>).includes(v);
 }
 
 function isSort(v: string | null): v is SortValue {
   return !!v && (SORT_VALUES as ReadonlyArray<string>).includes(v);
+}
+
+function isCategoryFilter(v: string | null): v is CategoryFilter {
+  return !!v && (CATEGORY_VALUES as ReadonlyArray<string>).includes(v);
 }
 
 function deadlineMs(t: Task): number {
@@ -97,6 +112,7 @@ export function TaskBoard({ initial }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterValue>("all");
   const [sort, setSort] = useState<SortValue>("smart");
+  const [category, setCategory] = useState<CategoryFilter>("all");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -104,6 +120,8 @@ export function TaskBoard({ initial }: Props) {
     if (isFilter(f)) setFilter(f);
     const s = window.localStorage.getItem(SORT_KEY);
     if (isSort(s)) setSort(s);
+    const c = window.localStorage.getItem(CATEGORY_KEY);
+    if (isCategoryFilter(c)) setCategory(c);
   }, []);
 
   useEffect(() => {
@@ -116,19 +134,42 @@ export function TaskBoard({ initial }: Props) {
     window.localStorage.setItem(SORT_KEY, sort);
   }, [sort]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(CATEGORY_KEY, category);
+  }, [category]);
+
   const counts = useMemo(() => {
     let active = 0;
     for (const t of tasks) if (!t.done) active += 1;
     return { all: tasks.length, active, done: tasks.length - active };
   }, [tasks]);
 
+  const categoryCounts = useMemo(() => {
+    const acc: Record<CategoryValue, number> = {
+      work: 0,
+      personal: 0,
+      study: 0,
+      other: 0,
+    };
+    for (const t of tasks) {
+      const key = (
+        CATEGORIES.some((c) => c.value === t.category) ? t.category : "other"
+      ) as CategoryValue;
+      acc[key] += 1;
+    }
+    return acc;
+  }, [tasks]);
+
   const sorted = useMemo(() => sortTasks(tasks, sort), [tasks, sort]);
 
   const visible = useMemo(() => {
-    if (filter === "active") return sorted.filter((t) => !t.done);
-    if (filter === "done") return sorted.filter((t) => t.done);
-    return sorted;
-  }, [sorted, filter]);
+    let list = sorted;
+    if (filter === "active") list = list.filter((t) => !t.done);
+    else if (filter === "done") list = list.filter((t) => t.done);
+    if (category !== "all") list = list.filter((t) => t.category === category);
+    return list;
+  }, [sorted, filter, category]);
 
   async function handleAdd(rawInput: string) {
     setError(null);
@@ -143,7 +184,10 @@ export function TaskBoard({ initial }: Props) {
         throw new Error(data.error || "Не вдалося додати задачу");
       }
       const newTask: Task = await res.json();
-      setTasks((prev) => [newTask, ...prev]);
+      setTasks((prev) => [
+        { ...newTask, comments: newTask.comments ?? [] },
+        ...prev,
+      ]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Невідома помилка");
     }
@@ -194,7 +238,99 @@ export function TaskBoard({ initial }: Props) {
         throw new Error(data.error || "Не вдалося оновити назву");
       }
       const updated: Task = await res.json();
-      setTasks((cur) => cur.map((t) => (t.id === id ? updated : t)));
+      setTasks((cur) =>
+        cur.map((t) =>
+          t.id === id
+            ? { ...updated, comments: updated.comments ?? t.comments }
+            : t
+        )
+      );
+    } catch (e) {
+      setTasks(prev);
+      setError(e instanceof Error ? e.message : "Невідома помилка");
+    }
+  }
+
+  async function handleEditCategory(id: string, next: CategoryValue) {
+    setError(null);
+    const prev = tasks;
+    setTasks(tasks.map((t) => (t.id === id ? { ...t, category: next } : t)));
+    try {
+      const res = await fetch(`/api/tasks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category: next }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Не вдалося змінити категорію");
+      }
+    } catch (e) {
+      setTasks(prev);
+      setError(e instanceof Error ? e.message : "Невідома помилка");
+    }
+  }
+
+  async function handleAddComment(taskId: string, body: string) {
+    setError(null);
+    const tempId = `tmp-${Math.random().toString(36).slice(2)}`;
+    const optimistic: Comment = {
+      id: tempId,
+      taskId,
+      body,
+      createdAt: new Date().toISOString(),
+    };
+    const prev = tasks;
+    setTasks(
+      tasks.map((t) =>
+        t.id === taskId ? { ...t, comments: [...t.comments, optimistic] } : t
+      )
+    );
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Не вдалося додати коментар");
+      }
+      const created: Comment = await res.json();
+      setTasks((cur) =>
+        cur.map((t) =>
+          t.id === taskId
+            ? {
+                ...t,
+                comments: t.comments.map((c) =>
+                  c.id === tempId ? created : c
+                ),
+              }
+            : t
+        )
+      );
+    } catch (e) {
+      setTasks(prev);
+      setError(e instanceof Error ? e.message : "Невідома помилка");
+    }
+  }
+
+  async function handleDeleteComment(taskId: string, commentId: string) {
+    setError(null);
+    const prev = tasks;
+    setTasks(
+      tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, comments: t.comments.filter((c) => c.id !== commentId) }
+          : t
+      )
+    );
+    try {
+      const res = await fetch(
+        `/api/tasks/${taskId}/comments/${commentId}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) throw new Error("Не вдалося видалити коментар");
     } catch (e) {
       setTasks(prev);
       setError(e instanceof Error ? e.message : "Невідома помилка");
@@ -202,12 +338,16 @@ export function TaskBoard({ initial }: Props) {
   }
 
   const showAllDoneBanner =
-    filter === "all" && counts.all > 0 && counts.active === 0;
+    filter === "all" && category === "all" && counts.all > 0 && counts.active === 0;
 
   function renderBody() {
     if (counts.all === 0) return <EmptyAll />;
 
-    if (filter === "active" && counts.active === 0) {
+    if (
+      filter === "active" &&
+      counts.active === 0 &&
+      category === "all"
+    ) {
       return (
         <EmptyAllDone
           actionLabel="Подивитись виконані"
@@ -216,8 +356,15 @@ export function TaskBoard({ initial }: Props) {
       );
     }
 
-    if (filter === "done" && counts.done === 0) {
-      return <EmptyFilter onReset={() => setFilter("all")} />;
+    if (visible.length === 0) {
+      return (
+        <EmptyFilter
+          onReset={() => {
+            setFilter("all");
+            setCategory("all");
+          }}
+        />
+      );
     }
 
     if (filter === "all") {
@@ -235,6 +382,9 @@ export function TaskBoard({ initial }: Props) {
                   onToggle={handleToggle}
                   onDelete={handleDelete}
                   onEditTitle={handleEditTitle}
+                  onEditCategory={handleEditCategory}
+                  onAddComment={handleAddComment}
+                  onDeleteComment={handleDeleteComment}
                 />
               ))}
             </Section>
@@ -248,6 +398,9 @@ export function TaskBoard({ initial }: Props) {
                   onToggle={handleToggle}
                   onDelete={handleDelete}
                   onEditTitle={handleEditTitle}
+                  onEditCategory={handleEditCategory}
+                  onAddComment={handleAddComment}
+                  onDeleteComment={handleDeleteComment}
                 />
               ))}
             </Section>
@@ -265,6 +418,9 @@ export function TaskBoard({ initial }: Props) {
             onToggle={handleToggle}
             onDelete={handleDelete}
             onEditTitle={handleEditTitle}
+            onEditCategory={handleEditCategory}
+            onAddComment={handleAddComment}
+            onDeleteComment={handleDeleteComment}
           />
         ))}
       </ul>
@@ -281,15 +437,18 @@ export function TaskBoard({ initial }: Props) {
         </div>
       )}
 
-      <RecommendPanel disabled={counts.active === 0} />
+      <DigestPanel disabled={counts.active === 0} />
 
       {counts.all > 0 && (
         <TaskControls
           filter={filter}
           sort={sort}
+          category={category}
           counts={counts}
+          categoryCounts={categoryCounts}
           onFilterChange={setFilter}
           onSortChange={setSort}
+          onCategoryChange={setCategory}
         />
       )}
 

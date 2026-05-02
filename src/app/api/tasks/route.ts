@@ -12,6 +12,7 @@ export async function GET() {
   try {
     const tasks = await prisma.task.findMany({
       orderBy: [{ done: "asc" }, { createdAt: "desc" }],
+      include: { comments: { orderBy: { createdAt: "asc" } } },
     });
 
     const sorted = [...tasks].sort((a, b) => {
@@ -63,8 +64,10 @@ export async function POST(req: Request) {
         rawInput,
         title: parsed.title,
         priority: parsed.priority,
+        category: parsed.category,
         deadline: parsed.deadline,
       },
+      include: { comments: { orderBy: { createdAt: "asc" } } },
     });
 
     return NextResponse.json(task, { status: 201 });

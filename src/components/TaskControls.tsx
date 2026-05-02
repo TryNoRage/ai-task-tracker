@@ -1,14 +1,20 @@
 "use client";
 
+import { CATEGORIES, type CategoryValue } from "@/lib/categories";
+
 export type FilterValue = "all" | "active" | "done";
 export type SortValue = "smart" | "deadline" | "priority" | "newest";
+export type CategoryFilter = "all" | CategoryValue;
 
 interface Props {
   filter: FilterValue;
   sort: SortValue;
+  category: CategoryFilter;
   counts: { all: number; active: number; done: number };
+  categoryCounts: Record<CategoryValue, number>;
   onFilterChange: (v: FilterValue) => void;
   onSortChange: (v: SortValue) => void;
+  onCategoryChange: (v: CategoryFilter) => void;
 }
 
 const FILTER_OPTIONS: Array<{ value: FilterValue; label: string; key: keyof Props["counts"] }> = [
@@ -27,78 +33,142 @@ const SORT_OPTIONS: Array<{ value: SortValue; label: string }> = [
 export function TaskControls({
   filter,
   sort,
+  category,
   counts,
+  categoryCounts,
   onFilterChange,
   onSortChange,
+  onCategoryChange,
 }: Props) {
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div
-        role="tablist"
-        aria-label="Фільтр задач"
-        className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-[var(--shadow-soft)]"
-      >
-        {FILTER_OPTIONS.map((opt) => {
-          const isActive = filter === opt.value;
-          const count = counts[opt.key];
-          return (
-            <button
-              key={opt.value}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              onClick={() => onFilterChange(opt.value)}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
-                isActive
-                  ? "bg-[var(--color-accent)] text-[var(--color-accent-foreground)] shadow-[var(--shadow-cta)]"
-                  : "text-[var(--color-foreground-muted)] hover:bg-[var(--color-surface-muted)]"
-              }`}
-            >
-              {opt.label}
-              <span
-                className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-semibold ${
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div
+          role="tablist"
+          aria-label="Фільтр задач"
+          className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-[var(--shadow-soft)]"
+        >
+          {FILTER_OPTIONS.map((opt) => {
+            const isActive = filter === opt.value;
+            const count = counts[opt.key];
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => onFilterChange(opt.value)}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
                   isActive
-                    ? "bg-white/20 text-[var(--color-accent-foreground)]"
-                    : "bg-[var(--color-surface-muted)] text-[var(--color-foreground-muted)]"
+                    ? "bg-[var(--color-accent)] text-[var(--color-accent-foreground)] shadow-[var(--shadow-cta)]"
+                    : "text-[var(--color-foreground-muted)] hover:bg-[var(--color-surface-muted)]"
                 }`}
               >
-                {count}
-              </span>
-            </button>
-          );
-        })}
+                {opt.label}
+                <span
+                  className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-semibold ${
+                    isActive
+                      ? "bg-white/20 text-[var(--color-accent-foreground)]"
+                      : "bg-[var(--color-surface-muted)] text-[var(--color-foreground-muted)]"
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <label className="inline-flex items-center gap-2 text-sm text-[var(--color-foreground-muted)]">
+          <span className="hidden sm:inline">Сортувати:</span>
+          <span className="relative inline-flex items-center">
+            <select
+              value={sort}
+              onChange={(e) => onSortChange(e.target.value as SortValue)}
+              className="appearance-none rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] py-1.5 pl-3.5 pr-9 text-sm font-medium text-[var(--color-foreground)] shadow-[var(--shadow-soft)] outline-none transition hover:border-[var(--color-border-strong)] focus:border-[var(--color-accent)] focus:shadow-[0_0_0_4px_color-mix(in_oklab,var(--color-accent)_15%,transparent)]"
+            >
+              {SORT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              className="pointer-events-none absolute right-3 h-3.5 w-3.5 text-[var(--color-muted)]"
+              aria-hidden
+            >
+              <path
+                d="M4 6l4 4 4-4"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+        </label>
       </div>
 
-      <label className="inline-flex items-center gap-2 text-sm text-[var(--color-foreground-muted)]">
-        <span className="hidden sm:inline">Сортувати:</span>
-        <span className="relative inline-flex items-center">
-          <select
-            value={sort}
-            onChange={(e) => onSortChange(e.target.value as SortValue)}
-            className="appearance-none rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] py-1.5 pl-3.5 pr-9 text-sm font-medium text-[var(--color-foreground)] shadow-[var(--shadow-soft)] outline-none transition hover:border-[var(--color-border-strong)] focus:border-[var(--color-accent)] focus:shadow-[0_0_0_4px_color-mix(in_oklab,var(--color-accent)_15%,transparent)]"
-          >
-            {SORT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          <svg
-            viewBox="0 0 16 16"
-            fill="none"
-            className="pointer-events-none absolute right-3 h-3.5 w-3.5 text-[var(--color-muted)]"
-            aria-hidden
-          >
-            <path
-              d="M4 6l4 4 4-4"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </span>
-      </label>
+      <div
+        role="tablist"
+        aria-label="Фільтр за категорією"
+        className="flex flex-wrap items-center gap-1.5"
+      >
+        <CategoryChip
+          active={category === "all"}
+          onClick={() => onCategoryChange("all")}
+          label="Усі"
+          count={counts.all}
+        />
+        {CATEGORIES.map((c) => (
+          <CategoryChip
+            key={c.value}
+            active={category === c.value}
+            onClick={() => onCategoryChange(c.value)}
+            label={`${c.emoji} ${c.label}`}
+            count={categoryCounts[c.value] ?? 0}
+          />
+        ))}
+      </div>
     </div>
+  );
+}
+
+function CategoryChip({
+  active,
+  onClick,
+  label,
+  count,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count: number;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition ${
+        active
+          ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+          : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-foreground-muted)] hover:border-[var(--color-border-strong)]"
+      }`}
+    >
+      <span>{label}</span>
+      <span
+        className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold ${
+          active
+            ? "bg-[var(--color-accent)] text-[var(--color-accent-foreground)]"
+            : "bg-[var(--color-surface-muted)] text-[var(--color-foreground-muted)]"
+        }`}
+      >
+        {count}
+      </span>
+    </button>
   );
 }

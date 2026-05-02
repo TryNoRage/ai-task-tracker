@@ -1,10 +1,12 @@
 import { openai } from "./openai";
 
 export type Priority = "high" | "medium" | "low";
+export type Category = "work" | "personal" | "study" | "other";
 
 export interface ParsedTask {
   title: string;
   priority: Priority;
+  category: Category;
   deadline: Date | null;
 }
 
@@ -29,6 +31,7 @@ function buildSystemPrompt(now: Date): string {
 {
   "title": string,
   "priority": "high" | "medium" | "low",
+  "category": "work" | "personal" | "study" | "other",
   "deadline": string | null
 }
 
@@ -38,6 +41,11 @@ function buildSystemPrompt(now: Date): string {
   - "high" — якщо є слова "терміново", "ASAP", "urgent", "критично", "негайно", "якнайшвидше"
   - "low" — якщо є слова "колись", "як буде час", "не терміново", "low priority", "whenever"
   - інакше "medium"
+- category:
+  - "work" — робочі задачі: мітинги, клієнти, звіти, презентації, проєкти, зарплата, deadline робочих процесів, "написати колезі", "коміт", "PR"
+  - "study" — навчання: курси, лекції, університет, "вивчити", "прочитати книгу", "домашка", "конспект", "екзамен"
+  - "personal" — побут і життя: родина, друзі, "купити", "подзвонити мамі", спорт, здоровʼя, лікар, господарство
+  - "other" — якщо не впевнений або задача не вписується в три категорії вище
 - deadline: ISO 8601 рядок з часовою зоною Europe/Kyiv (наприклад "2026-04-08T12:00:00+03:00"), або null якщо дедлайн не вказано.
 - Відносні дати: "завтра" = +1 день, "післязавтра" = +2 дні, "в понеділок" = найближчий понеділок (якщо сьогодні вже понеділок — наступний).
 - Час доби: "до ранку" = 09:00, "до обіду" = 12:00, "до вечора" = 18:00, "до ночі" = 22:00. Якщо тільки дата без часу — 23:59 того дня.
@@ -50,12 +58,25 @@ ISO зараз: ${todayIso}`;
 interface RawParsed {
   title?: unknown;
   priority?: unknown;
+  category?: unknown;
   deadline?: unknown;
 }
 
 function normalizePriority(value: unknown): Priority {
   if (value === "high" || value === "medium" || value === "low") return value;
   return "medium";
+}
+
+function normalizeCategory(value: unknown): Category {
+  if (
+    value === "work" ||
+    value === "personal" ||
+    value === "study" ||
+    value === "other"
+  ) {
+    return value;
+  }
+  return "other";
 }
 
 function normalizeDeadline(value: unknown): Date | null {
@@ -68,6 +89,7 @@ function fallbackParse(rawInput: string): ParsedTask {
   return {
     title: rawInput.trim().slice(0, 200) || "Без назви",
     priority: "medium",
+    category: "other",
     deadline: null,
   };
 }
@@ -105,6 +127,7 @@ export async function parseTask(rawInput: string): Promise<ParsedTask> {
     return {
       title,
       priority: normalizePriority(parsed.priority),
+      category: normalizeCategory(parsed.category),
       deadline: normalizeDeadline(parsed.deadline),
     };
   } catch (err) {

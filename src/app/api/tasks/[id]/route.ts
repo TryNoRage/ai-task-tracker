@@ -46,6 +46,25 @@ export async function PATCH(req: Request, { params }: Ctx) {
     data.title = title;
   }
 
+  if (
+    "category" in body &&
+    typeof (body as { category: unknown }).category === "string"
+  ) {
+    const category = (body as { category: string }).category;
+    if (
+      category !== "work" &&
+      category !== "personal" &&
+      category !== "study" &&
+      category !== "other"
+    ) {
+      return NextResponse.json(
+        { error: "Невідома категорія" },
+        { status: 400 }
+      );
+    }
+    data.category = category;
+  }
+
   if (Object.keys(data).length === 0) {
     return NextResponse.json(
       { error: "Немає полів для оновлення" },
@@ -54,7 +73,11 @@ export async function PATCH(req: Request, { params }: Ctx) {
   }
 
   try {
-    const updated = await prisma.task.update({ where: { id }, data });
+    const updated = await prisma.task.update({
+      where: { id },
+      data,
+      include: { comments: { orderBy: { createdAt: "asc" } } },
+    });
     return NextResponse.json(updated);
   } catch (err) {
     if (

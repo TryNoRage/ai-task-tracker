@@ -13,7 +13,19 @@ model Task {
   rawInput  String
   title     String
   priority  String
+  category  String    @default("personal")
   deadline  DateTime?
   done      Boolean   @default(false)
   createdAt DateTime  @default(now())
+  comments  Comment[]
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([taskId, createdAt])
 }

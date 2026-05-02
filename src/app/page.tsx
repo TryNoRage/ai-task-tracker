@@ -8,15 +8,23 @@ async function loadTasks(): Promise<Task[]> {
   try {
     const tasks = await prisma.task.findMany({
       orderBy: [{ done: "asc" }, { createdAt: "desc" }],
+      include: { comments: { orderBy: { createdAt: "asc" } } },
     });
     return tasks.map((t) => ({
       id: t.id,
       rawInput: t.rawInput,
       title: t.title,
       priority: t.priority,
+      category: t.category,
       deadline: t.deadline ? t.deadline.toISOString() : null,
       done: t.done,
       createdAt: t.createdAt.toISOString(),
+      comments: t.comments.map((c) => ({
+        id: c.id,
+        taskId: c.taskId,
+        body: c.body,
+        createdAt: c.createdAt.toISOString(),
+      })),
     }));
   } catch (err) {
     console.error("[page] failed to load tasks:", err);

@@ -52,3 +52,32 @@ export function isOverdue(iso: string | null, done: boolean): boolean {
   if (Number.isNaN(d.getTime())) return false;
   return d.getTime() < Date.now();
 }
+
+export function formatRelative(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+
+  const now = Date.now();
+  const diffMs = now - d.getTime();
+  const diffSec = Math.round(diffMs / 1000);
+
+  if (diffSec < 0) return DATE_TIME.format(d);
+  if (diffSec < 30) return "щойно";
+  if (diffSec < 60) return `${diffSec} с тому`;
+
+  const diffMin = Math.round(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} хв тому`;
+
+  const diffHours = Math.round(diffMin / 60);
+  if (diffHours < 24) return `${diffHours} год тому`;
+
+  const today = startOfDayKyiv(new Date());
+  const target = startOfDayKyiv(d);
+  const diffDays = Math.round((today - target) / (1000 * 60 * 60 * 24));
+  const time = TIME_ONLY.format(d);
+
+  if (diffDays === 1) return `Вчора, ${time}`;
+  if (diffDays < 7) return `${diffDays} дн тому`;
+
+  return DATE_TIME.format(d);
+}

@@ -2,13 +2,22 @@
 
 import { useState } from "react";
 import { formatDeadline } from "@/lib/format";
+import { getCategory } from "@/lib/categories";
 
-interface RecommendItem {
+interface DigestItem {
   id: string;
   title: string;
   priority: string;
+  category: string;
   deadline: string | null;
   reason: string;
+}
+
+interface DigestPayload {
+  morning: DigestItem[];
+  day: DigestItem[];
+  evening: DigestItem[];
+  summary: string;
 }
 
 interface Props {
@@ -19,7 +28,7 @@ type State =
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "error"; message: string }
-  | { kind: "result"; items: RecommendItem[] };
+  | { kind: "result"; digest: DigestPayload };
 
 const PRIORITY_DOT: Record<string, string> = {
   high: "bg-[var(--color-priority-high)]",
@@ -27,23 +36,38 @@ const PRIORITY_DOT: Record<string, string> = {
   low: "bg-[var(--color-priority-low)]",
 };
 
-export function RecommendPanel({ disabled }: Props) {
+const SLOTS: Array<{
+  key: "morning" | "day" | "evening";
+  label: string;
+  emoji: string;
+  hint: string;
+}> = [
+  { key: "morning", label: "Ранок", emoji: "🌅", hint: "до 12:00" },
+  { key: "day", label: "День", emoji: "☀️", hint: "12:00–18:00" },
+  { key: "evening", label: "Вечір", emoji: "🌙", hint: "після 18:00" },
+];
+
+export function DigestPanel({ disabled }: Props) {
   const [state, setState] = useState<State>({ kind: "idle" });
 
-  async function fetchRecommendations() {
+  async function fetchDigest() {
     setState({ kind: "loading" });
     try {
-      const res = await fetch("/api/recommend", { method: "POST" });
+      const res = await fetch("/api/digest", { method: "POST" });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Не вдалося отримати поради");
+        throw new Error(data.error || "Не вдалося скласти план");
       }
-      const data: { recommendations: RecommendItem[] } = await res.json();
-      if (!data.recommendations || data.recommendations.length === 0) {
-        setState({ kind: "error", message: "AI не знайшов що порадити" });
+      const data: { digest: DigestPayload } = await res.json();
+      const total =
+        data.digest.morning.length +
+        data.digest.day.length +
+        data.digest.evening.length;
+      if (total === 0) {
+        setState({ kind: "error", message: "AI не зміг скласти план — спробуй ще раз" });
         return;
       }
-      setState({ kind: "result", items: data.recommendations });
+      setState({ kind: "result", digest: data.digest });
     } catch (e) {
       setState({
         kind: "error",
@@ -65,27 +89,27 @@ export function RecommendPanel({ disabled }: Props) {
           <SparkleIcon />
           <div>
             <p className="text-sm font-semibold text-[var(--color-foreground)]">
-              Що робити зараз?
+              Що на сьогодні?
             </p>
             <p className="text-xs text-[var(--color-foreground-muted)]">
-              AI прогляне список і порадить топ-3 на сьогодні.
+              AI складе план дня — ранок, день і вечір.
             </p>
           </div>
         </div>
         <button
           type="button"
-          onClick={fetchRecommendations}
+          onClick={fetchDigest}
           disabled={state.kind === "loading"}
           className="inline-flex items-center justify-center gap-2 rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-[var(--color-accent-foreground)] shadow-[var(--shadow-cta)] transition hover:bg-[var(--color-accent-hover)] disabled:opacity-60"
         >
           {state.kind === "loading" ? (
             <>
               <Spinner />
-              Думаю…
+              Складаю план…
             </>
           ) : (
             <>
-              Запитати в AI
+              Скласти план
               <ArrowRight />
             </>
           )}
@@ -111,7 +135,7 @@ export function RecommendPanel({ disabled }: Props) {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={fetchRecommendations}
+            onClick={fetchDigest}
             className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-accent)] px-3.5 py-1.5 text-sm font-semibold text-[var(--color-accent-foreground)] shadow-[var(--shadow-cta)] transition hover:bg-[var(--color-accent-hover)]"
           >
             Повторити
@@ -129,19 +153,21 @@ export function RecommendPanel({ disabled }: Props) {
     );
   }
 
+  const { digest } = state;
+
   return (
     <div className="overflow-hidden rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)]">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-accent-soft)] px-4 py-3">
         <div className="flex items-center gap-2.5">
           <SparkleIcon />
           <p className="text-sm font-semibold text-[var(--color-foreground)]">
-            AI радить
+            План на сьогодні
           </p>
         </div>
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={fetchRecommendations}
+            onClick={fetchDigest}
             className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-[var(--color-accent)] transition hover:bg-white/60"
             title="Оновити"
           >
@@ -159,42 +185,80 @@ export function RecommendPanel({ disabled }: Props) {
         </div>
       </div>
 
-      <ol className="flex flex-col divide-y divide-[var(--color-border)]">
-        {state.items.map((item, idx) => {
-          const priorityKey =
-            item.priority in PRIORITY_DOT ? item.priority : "medium";
-          const deadlineText = formatDeadline(item.deadline);
+      {digest.summary && (
+        <p className="border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-sm italic text-[var(--color-foreground-muted)]">
+          {digest.summary}
+        </p>
+      )}
+
+      <div className="flex flex-col">
+        {SLOTS.map((slot) => {
+          const items = digest[slot.key];
+          if (items.length === 0) return null;
           return (
-            <li
-              key={item.id}
-              className="flex items-start gap-3 px-4 py-3"
+            <section
+              key={slot.key}
+              className="border-b border-[var(--color-border)] last:border-b-0"
             >
-              <span className="mt-0.5 inline-flex h-6 w-6 flex-none items-center justify-center rounded-full bg-[var(--color-surface-muted)] text-xs font-bold text-[var(--color-accent)]">
-                {idx + 1}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`h-2 w-2 flex-none rounded-full ${PRIORITY_DOT[priorityKey]}`}
-                    aria-hidden
-                  />
-                  <p className="min-w-0 truncate text-sm font-semibold text-[var(--color-foreground)]">
-                    {item.title}
-                  </p>
-                  {deadlineText && (
-                    <span className="ml-auto hidden flex-none rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-foreground-muted)] sm:inline-block">
-                      {deadlineText}
-                    </span>
-                  )}
-                </div>
-                <p className="mt-1 text-sm leading-snug text-[var(--color-foreground-muted)]">
-                  {item.reason}
-                </p>
+              <div className="flex items-center gap-2 bg-[var(--color-surface-muted)] px-4 py-2">
+                <span className="text-base leading-none" aria-hidden>
+                  {slot.emoji}
+                </span>
+                <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-foreground)]">
+                  {slot.label}
+                </h3>
+                <span className="text-[11px] text-[var(--color-muted)]">
+                  {slot.hint}
+                </span>
+                <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--color-surface)] px-1.5 text-[11px] font-semibold text-[var(--color-accent)]">
+                  {items.length}
+                </span>
               </div>
-            </li>
+              <ol className="flex flex-col divide-y divide-[var(--color-border)]">
+                {items.map((item) => {
+                  const priorityKey =
+                    item.priority in PRIORITY_DOT ? item.priority : "medium";
+                  const deadlineText = formatDeadline(item.deadline);
+                  const cat = getCategory(item.category);
+                  return (
+                    <li
+                      key={item.id}
+                      className="flex items-start gap-3 px-4 py-3"
+                    >
+                      <span
+                        className={`mt-1.5 h-2 w-2 flex-none rounded-full ${PRIORITY_DOT[priorityKey]}`}
+                        aria-hidden
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <p className="min-w-0 text-sm font-semibold text-[var(--color-foreground)]">
+                            {item.title}
+                          </p>
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-foreground-muted)]"
+                            title={cat.label}
+                          >
+                            <span aria-hidden>{cat.emoji}</span>
+                            {cat.label}
+                          </span>
+                          {deadlineText && (
+                            <span className="rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-foreground-muted)]">
+                              {deadlineText}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-sm leading-snug text-[var(--color-foreground-muted)]">
+                          {item.reason}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
           );
         })}
-      </ol>
+      </div>
     </div>
   );
 }
