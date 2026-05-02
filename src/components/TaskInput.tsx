@@ -42,6 +42,35 @@ const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
 // контейнер. З 250мс ondataavailable стрілятиме регулярно.
 const RECORDER_TIMESLICE_MS = 250;
 
+const LOG_PREFIX = "[transcribe]";
+
+function tlog(event: string, data?: Record<string, unknown>): void {
+  if (typeof console === "undefined") return;
+  if (data) console.log(LOG_PREFIX, event, data);
+  else console.log(LOG_PREFIX, event);
+}
+
+function listSupportedMimes(): string[] {
+  if (typeof MediaRecorder === "undefined") return [];
+  return MIME_CANDIDATES.filter((m) => MediaRecorder.isTypeSupported(m));
+}
+
+interface RecorderMeta {
+  ua: string;
+  chosenMime: string | undefined;
+  supportedMimes: string[];
+  audioBitsPerSecond: number;
+  trackSettings: MediaTrackSettings | null;
+  trackLabel: string;
+  trackMuted: boolean | null;
+  chunkCount: number;
+  chunkSizes: number[];
+  elapsedMs: number;
+  blobSize: number;
+  recorderState: string;
+  stoppedManually: boolean;
+}
+
 function pickAudioMime(): string | undefined {
   if (typeof MediaRecorder === "undefined") return undefined;
   for (const m of MIME_CANDIDATES) {
@@ -91,10 +120,14 @@ export function TaskInput({ onSubmit, disabled }: Props) {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const chunkSizesRef = useRef<number[]>([]);
   const startedAtRef = useRef<number>(0);
   const timerRef = useRef<number | null>(null);
   const mimeRef = useRef<string | undefined>(undefined);
   const stoppedManuallyRef = useRef<boolean>(false);
+  const trackSettingsRef = useRef<MediaTrackSettings | null>(null);
+  const trackLabelRef = useRef<string>("");
+  const supportedMimesRef = useRef<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const isBusy = submitting || disabled;
@@ -145,12 +178,33 @@ export function TaskInput({ onSubmit, disabled }: Props) {
   async function startRecording() {
     if (recState !== "idle" || isBusy) return;
     setRecError(null);
+    const supportedMimes = listSupportedMimes();
+    supportedMimesRef.current = supportedMimes;
+    tlog("startRecording.begin", {
+      supportedMimes,
+      constraints: AUDIO_CONSTRAINTS,
+      ua: typeof navigator !== "undefined" ? navigator.userAgent : "",
+    });
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: AUDIO_CONSTRAINTS,
       });
+      const audioTracks = stream.getAudioTracks();
+      const track = audioTracks[0] ?? null;
+      const settings = track?.getSettings?.() ?? null;
+      trackSettingsRef.current = settings;
+      trackLabelRef.current = track?.label ?? "";
+      tlog("getUserMedia.ok", {
+        trackCount: audioTracks.length,
+        label: track?.label,
+        muted: track?.muted,
+        readyState: track?.readyState,
+        enabled: track?.enabled,
+        settings,
+      });
       const mime = pickAudioMime();
       mimeRef.current = mime;
+      tlog("mime.chosen", { mime, supportedMimes });
       const recorder = new MediaRecorder(stream, {
         ...(mime ? { mimeType: mime } : {}),
         audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
@@ -158,12 +212,21 @@ export function TaskInput({ onSubmit, disabled }: Props) {
       streamRef.current = stream;
       recorderRef.current = recorder;
       chunksRef.current = [];
+      chunkSizesRef.current = [];
       stoppedManuallyRef.current = false;
 
       recorder.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data);
+        const size = ev.data?.size ?? 0;
+        chunkSizesRef.current.push(size);
+        if (size > 0) chunksRef.current.push(ev.data);
+        tlog("recorder.dataavailable", {
+          index: chunkSizesRef.current.length - 1,
+          size,
+          state: recorder.state,
+        });
       };
       recorder.onerror = (ev) => {
+        tlog("recorder.error", { event: String(ev) });
         console.error("[recorder.onerror]", ev);
         setRecError("Помилка запису");
         teardownStream();
@@ -174,14 +237,31 @@ export function TaskInput({ onSubmit, disabled }: Props) {
         const elapsedMs = Date.now() - startedAtRef.current;
         const blobType = mimeRef.current ?? "audio/webm";
         const blob = new Blob(chunksRef.current, { type: blobType });
+        const chunkSizes = [...chunkSizesRef.current];
         chunksRef.current = [];
+        chunkSizesRef.current = [];
+        const finalRecorderState = recorder.state;
         teardownStream();
         if (timerRef.current !== null) {
           window.clearInterval(timerRef.current);
           timerRef.current = null;
         }
+        tlog("recorder.stop", {
+          elapsedMs,
+          blobSize: blob.size,
+          blobType,
+          chunkCount: chunkSizes.length,
+          chunkSizes,
+          stoppedManually: stoppedManuallyRef.current,
+          recorderState: finalRecorderState,
+        });
         const tooShort = elapsedMs < MIN_RECORD_MS;
         if (tooShort || blob.size === 0) {
+          tlog("recorder.skip", {
+            reason: tooShort ? "too_short" : "empty_blob",
+            elapsedMs,
+            blobSize: blob.size,
+          });
           setRecState("idle");
           setSeconds(0);
           if (tooShort && stoppedManuallyRef.current) {
@@ -189,11 +269,32 @@ export function TaskInput({ onSubmit, disabled }: Props) {
           }
           return;
         }
-        void uploadAndTranscribe(blob, blobType);
+        const meta: RecorderMeta = {
+          ua: typeof navigator !== "undefined" ? navigator.userAgent : "",
+          chosenMime: mimeRef.current,
+          supportedMimes: supportedMimesRef.current,
+          audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
+          trackSettings: trackSettingsRef.current,
+          trackLabel: trackLabelRef.current,
+          trackMuted: null,
+          chunkCount: chunkSizes.length,
+          chunkSizes,
+          elapsedMs,
+          blobSize: blob.size,
+          recorderState: finalRecorderState,
+          stoppedManually: stoppedManuallyRef.current,
+        };
+        void uploadAndTranscribe(blob, blobType, meta);
       };
 
       startedAtRef.current = Date.now();
       recorder.start(RECORDER_TIMESLICE_MS);
+      tlog("recorder.start", {
+        timeslice: RECORDER_TIMESLICE_MS,
+        mime,
+        bitrate: AUDIO_BITS_PER_SECOND,
+        state: recorder.state,
+      });
       setRecState("recording");
       setSeconds(0);
       timerRef.current = window.setInterval(() => {
@@ -204,8 +305,10 @@ export function TaskInput({ onSubmit, disabled }: Props) {
         }
       }, 250);
     } catch (err) {
-      console.error("[startRecording]", err);
       const name = err instanceof Error ? err.name : "";
+      const message = err instanceof Error ? err.message : String(err);
+      tlog("startRecording.error", { name, message });
+      console.error("[startRecording]", err);
       if (name === "NotAllowedError" || name === "SecurityError") {
         setRecError("Дозвіл на мікрофон не надано");
       } else if (name === "NotFoundError") {
@@ -223,9 +326,13 @@ export function TaskInput({ onSubmit, disabled }: Props) {
     const recorder = recorderRef.current;
     if (!recorder || recorder.state === "inactive") return;
     stoppedManuallyRef.current = true;
+    tlog("stopRecording", { state: recorder.state });
     try {
       recorder.stop();
     } catch (err) {
+      tlog("stopRecording.error", {
+        message: err instanceof Error ? err.message : String(err),
+      });
       console.error("[stopRecording]", err);
       teardownStream();
       setRecState("idle");
@@ -241,24 +348,48 @@ export function TaskInput({ onSubmit, disabled }: Props) {
     recorderRef.current = null;
   }
 
-  async function uploadAndTranscribe(blob: Blob, mime: string) {
+  async function uploadAndTranscribe(
+    blob: Blob,
+    mime: string,
+    meta: RecorderMeta
+  ) {
     setRecState("transcribing");
+    const ext = extForMime(mime);
+    const fileName = `voice.${ext}`;
+    tlog("upload.start", {
+      fileName,
+      mime,
+      ext,
+      blobSize: blob.size,
+      meta,
+    });
+    const requestStartedAt = Date.now();
     try {
-      const ext = extForMime(mime);
       const fd = new FormData();
-      fd.append("audio", new File([blob], `voice.${ext}`, { type: mime }));
+      fd.append("audio", new File([blob], fileName, { type: mime }));
+      fd.append("meta", JSON.stringify(meta));
       const res = await fetch("/api/transcribe", {
         method: "POST",
         body: fd,
+      });
+      const latencyMs = Date.now() - requestStartedAt;
+      const contentType = res.headers.get("content-type") ?? "";
+      tlog("upload.response", {
+        status: res.status,
+        ok: res.ok,
+        contentType,
+        latencyMs,
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as {
           error?: string;
         };
+        tlog("upload.error", { status: res.status, error: data.error });
         throw new Error(data.error || "Не вдалося розпізнати голос");
       }
       const data = (await res.json()) as { text?: string };
       const text = (data.text ?? "").trim();
+      tlog("upload.parsed", { textLen: text.length, text });
       if (text) {
         setValue((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
         requestAnimationFrame(() => textareaRef.current?.focus());
@@ -266,6 +397,10 @@ export function TaskInput({ onSubmit, disabled }: Props) {
         setRecError("Нічого не розпізнано — спробуй ще раз");
       }
     } catch (err) {
+      tlog("upload.exception", {
+        message: err instanceof Error ? err.message : String(err),
+        latencyMs: Date.now() - requestStartedAt,
+      });
       setRecError(
         err instanceof Error ? err.message : "Помилка транскрипції"
       );
