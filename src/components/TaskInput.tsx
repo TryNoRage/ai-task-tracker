@@ -44,10 +44,47 @@ const RECORDER_TIMESLICE_MS = 250;
 
 const LOG_PREFIX = "[transcribe]";
 
+// #region agent log
+const DEBUG_ENDPOINT =
+  "http://127.0.0.1:7876/ingest/e0c2c14d-15b3-4794-b5bd-d6796cc6b5cf";
+const DEBUG_SESSION_ID = "90a8a7";
+
+function dpost(
+  location: string,
+  message: string,
+  data: Record<string, unknown>,
+  hypothesisId?: string
+): void {
+  if (typeof fetch === "undefined") return;
+  try {
+    fetch(DEBUG_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": DEBUG_SESSION_ID,
+      },
+      body: JSON.stringify({
+        sessionId: DEBUG_SESSION_ID,
+        runId: "client-prod",
+        hypothesisId,
+        location,
+        message,
+        data,
+        timestamp: Date.now(),
+      }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {}
+}
+// #endregion
+
 function tlog(event: string, data?: Record<string, unknown>): void {
   if (typeof console === "undefined") return;
   if (data) console.log(LOG_PREFIX, event, data);
   else console.log(LOG_PREFIX, event);
+  // #region agent log
+  dpost(`TaskInput.tsx:${event}`, event, data ?? {});
+  // #endregion
 }
 
 function listSupportedMimes(): string[] {
@@ -219,11 +256,24 @@ export function TaskInput({ onSubmit, disabled }: Props) {
         const size = ev.data?.size ?? 0;
         chunkSizesRef.current.push(size);
         if (size > 0) chunksRef.current.push(ev.data);
+        // #region agent log
+        const liveTrack = streamRef.current?.getAudioTracks()[0] ?? null;
+        const liveSettings = liveTrack?.getSettings?.() ?? null;
         tlog("recorder.dataavailable", {
           index: chunkSizesRef.current.length - 1,
           size,
           state: recorder.state,
+          trackMuted: liveTrack?.muted,
+          trackEnabled: liveTrack?.enabled,
+          trackReadyState: liveTrack?.readyState,
+          liveSampleRate: liveSettings?.sampleRate,
+          liveChannelCount: liveSettings?.channelCount,
+          liveAutoGain: (liveSettings as { autoGainControl?: boolean } | null)
+            ?.autoGainControl,
+          liveNoiseSup: (liveSettings as { noiseSuppression?: boolean } | null)
+            ?.noiseSuppression,
         });
+        // #endregion
       };
       recorder.onerror = (ev) => {
         tlog("recorder.error", { event: String(ev) });

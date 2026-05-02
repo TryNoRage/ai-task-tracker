@@ -100,12 +100,15 @@ export async function POST(req: Request) {
     );
   }
 
+  // #region agent log
   log(rid, "audio.received", {
     name: file.name,
     type: file.type,
     size: file.size,
-    clientMeta: clientMeta.slice(0, 500),
+    clientMetaLen: clientMeta.length,
+    clientMeta: clientMeta.slice(0, 4000),
   });
+  // #endregion
 
   if (file.size === 0) {
     log(rid, "audio.empty", {});
