@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { requireApiUser } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,9 @@ interface Ctx {
 }
 
 export async function POST(req: Request, { params }: Ctx) {
+  const auth = await requireApiUser(req);
+  if (!auth.ok) return auth.response;
+
   const { id: taskId } = await params;
 
   let body: unknown;
@@ -51,9 +55,9 @@ export async function POST(req: Request, { params }: Ctx) {
   try {
     const task = await prisma.task.findUnique({
       where: { id: taskId },
-      select: { id: true },
+      select: { id: true, userId: true },
     });
-    if (!task) {
+    if (!task || task.userId !== auth.user.id) {
       return NextResponse.json({ error: "Задачу не знайдено" }, { status: 404 });
     }
 

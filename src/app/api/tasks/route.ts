@@ -2,15 +2,20 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { parseTask } from "@/lib/parseTask";
+import { requireApiUser } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const PRIORITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
-export async function GET() {
+export async function GET(req: Request) {
+  const auth = await requireApiUser(req);
+  if (!auth.ok) return auth.response;
+
   try {
     const tasks = await prisma.task.findMany({
+      where: { userId: auth.user.id },
       orderBy: [{ done: "asc" }, { createdAt: "desc" }],
       include: { comments: { orderBy: { createdAt: "asc" } } },
     });
@@ -37,6 +42,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const auth = await requireApiUser(req);
+  if (!auth.ok) return auth.response;
+
   let body: unknown;
   try {
     body = await req.json();
@@ -61,6 +69,7 @@ export async function POST(req: Request) {
 
     const task = await prisma.task.create({
       data: {
+        userId: auth.user.id,
         rawInput,
         title: parsed.title,
         priority: parsed.priority,

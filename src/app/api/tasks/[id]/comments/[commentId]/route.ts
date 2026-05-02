@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { requireApiUser } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,7 +10,25 @@ interface Ctx {
   params: Promise<{ id: string; commentId: string }>;
 }
 
+async function loadOwnedComment(
+  commentId: string,
+  taskId: string,
+  userId: string
+) {
+  return prisma.comment.findFirst({
+    where: {
+      id: commentId,
+      taskId,
+      task: { userId },
+    },
+    select: { id: true },
+  });
+}
+
 export async function PATCH(req: Request, { params }: Ctx) {
+  const auth = await requireApiUser(req);
+  if (!auth.ok) return auth.response;
+
   const { id: taskId, commentId } = await params;
 
   let body: unknown;
@@ -49,12 +68,8 @@ export async function PATCH(req: Request, { params }: Ctx) {
   }
 
   try {
-    const existing = await prisma.comment.findUnique({
-      where: { id: commentId },
-      select: { taskId: true },
-    });
-
-    if (!existing || existing.taskId !== taskId) {
+    const owned = await loadOwnedComment(commentId, taskId, auth.user.id);
+    if (!owned) {
       return NextResponse.json(
         { error: "Коментар не знайдено" },
         { status: 404 }
@@ -84,16 +99,15 @@ export async function PATCH(req: Request, { params }: Ctx) {
   }
 }
 
-export async function DELETE(_req: Request, { params }: Ctx) {
+export async function DELETE(req: Request, { params }: Ctx) {
+  const auth = await requireApiUser(req);
+  if (!auth.ok) return auth.response;
+
   const { id: taskId, commentId } = await params;
 
   try {
-    const existing = await prisma.comment.findUnique({
-      where: { id: commentId },
-      select: { taskId: true },
-    });
-
-    if (!existing || existing.taskId !== taskId) {
+    const owned = await loadOwnedComment(commentId, taskId, auth.user.id);
+    if (!owned) {
       return NextResponse.json(
         { error: "Коментар не знайдено" },
         { status: 404 }

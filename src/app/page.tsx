@@ -1,12 +1,15 @@
 import { prisma } from "@/lib/prisma";
+import { requireUser } from "@/lib/session";
 import { TaskBoard } from "@/components/TaskBoard";
+import { UserMenu } from "@/components/UserMenu";
 import type { Task } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-async function loadTasks(): Promise<Task[]> {
+async function loadTasks(userId: string): Promise<Task[]> {
   try {
     const tasks = await prisma.task.findMany({
+      where: { userId },
       orderBy: [{ done: "asc" }, { createdAt: "desc" }],
       include: { comments: { orderBy: { createdAt: "asc" } } },
     });
@@ -33,11 +36,15 @@ async function loadTasks(): Promise<Task[]> {
 }
 
 export default async function Home() {
-  const tasks = await loadTasks();
+  const user = await requireUser();
+  const tasks = await loadTasks(user.id);
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-10 px-4 py-10 sm:py-16">
-      <header className="flex flex-col items-center gap-4 text-center">
+      <header className="relative flex flex-col items-center gap-4 text-center">
+        <div className="absolute right-0 top-0">
+          <UserMenu user={user} />
+        </div>
         <span className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-xs font-medium text-[var(--color-foreground-muted)] shadow-[var(--shadow-soft)]">
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]" />
           AI Таск-Трекер

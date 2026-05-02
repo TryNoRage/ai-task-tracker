@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { buildDailyDigest, type DigestItem, type Slot } from "@/lib/dailyDigest";
+import { requireApiUser } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,10 +15,13 @@ interface EnrichedItem {
   reason: string;
 }
 
-export async function POST() {
+export async function POST(req: Request) {
+  const auth = await requireApiUser(req);
+  if (!auth.ok) return auth.response;
+
   try {
     const active = await prisma.task.findMany({
-      where: { done: false },
+      where: { userId: auth.user.id, done: false },
       orderBy: [{ createdAt: "desc" }],
       take: 50,
     });
