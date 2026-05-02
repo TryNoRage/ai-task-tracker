@@ -18,6 +18,7 @@ type RecState = "idle" | "recording" | "transcribing";
 
 const MAX_RECORD_SECONDS = 120;
 const MIN_RECORD_MS = 300;
+const AUDIO_BITS_PER_SECOND = 128_000;
 
 const MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
@@ -25,6 +26,16 @@ const MIME_CANDIDATES = [
   "audio/mp4",
   "audio/ogg;codecs=opus",
 ];
+
+// Більш «чистий» аудіопотік для Whisper: моно, 48 kHz, з вбудованою
+// шумоочисткою і AGC. На мобільних дефолти браузера часто гірші.
+const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  channelCount: 1,
+  sampleRate: 48_000,
+};
 
 function pickAudioMime(): string | undefined {
   if (typeof MediaRecorder === "undefined") return undefined;
@@ -130,13 +141,15 @@ export function TaskInput({ onSubmit, disabled }: Props) {
     if (recState !== "idle" || isBusy) return;
     setRecError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: AUDIO_CONSTRAINTS,
+      });
       const mime = pickAudioMime();
       mimeRef.current = mime;
-      const recorder = new MediaRecorder(
-        stream,
-        mime ? { mimeType: mime } : undefined
-      );
+      const recorder = new MediaRecorder(stream, {
+        ...(mime ? { mimeType: mime } : {}),
+        audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
+      });
       streamRef.current = stream;
       recorderRef.current = recorder;
       chunksRef.current = [];

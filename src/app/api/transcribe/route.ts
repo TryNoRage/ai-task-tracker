@@ -6,7 +6,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MODEL = "whisper-1";
+const LANGUAGE = "uk";
 const MAX_BYTES = 25 * 1024 * 1024;
+
+// Підказка для Whisper: задає очікувану лексику/стиль і знижує кількість
+// галюцинацій на коротких/шумних записах. Не транскрибується дослівно —
+// лише зміщує імовірності токенів.
+const PROMPT =
+  "Це коротка україномовна нотатка-задача. Можуть бути імена, дати (сьогодні, завтра, у пʼятницю, до обіду), час (о 14:00), пріоритети (терміново, важливо), згадки про дзвінки, листи, зустрічі, дедлайни.";
 
 const HALLUCINATIONS = new Set(
   [
@@ -74,6 +81,9 @@ export async function POST(req: Request) {
     const tr = await openai.audio.transcriptions.create({
       file,
       model: MODEL,
+      language: LANGUAGE,
+      prompt: PROMPT,
+      temperature: 0,
       response_format: "json",
     });
 
