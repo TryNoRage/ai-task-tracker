@@ -27,15 +27,20 @@ const MIME_CANDIDATES = [
   "audio/ogg;codecs=opus",
 ];
 
-// Більш «чистий» аудіопотік для Whisper: моно, 48 kHz, з вбудованою
-// шумоочисткою і AGC. На мобільних дефолти браузера часто гірші.
+// Тільки «м'які» побажання через ideal — щоб браузер ніколи не повертав
+// мертвий трек, якщо девайс не вміє рівно те, що ми просимо. Whisper не
+// потребує конкретної частоти/каналів — головне, щоб у файлі було аудіо.
 const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  autoGainControl: true,
-  channelCount: 1,
-  sampleRate: 48_000,
+  echoCancellation: { ideal: true },
+  noiseSuppression: { ideal: true },
+  autoGainControl: { ideal: true },
+  channelCount: { ideal: 1 },
 };
+
+// Розмір тайм-слайсу для MediaRecorder. Без нього chunk віддається лише
+// при stop() — і на коротких записах ризикуємо отримати майже порожній
+// контейнер. З 250мс ondataavailable стрілятиме регулярно.
+const RECORDER_TIMESLICE_MS = 250;
 
 function pickAudioMime(): string | undefined {
   if (typeof MediaRecorder === "undefined") return undefined;
@@ -188,7 +193,7 @@ export function TaskInput({ onSubmit, disabled }: Props) {
       };
 
       startedAtRef.current = Date.now();
-      recorder.start();
+      recorder.start(RECORDER_TIMESLICE_MS);
       setRecState("recording");
       setSeconds(0);
       timerRef.current = window.setInterval(() => {
