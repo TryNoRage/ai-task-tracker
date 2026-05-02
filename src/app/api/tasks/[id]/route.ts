@@ -24,8 +24,26 @@ export async function PATCH(req: Request, { params }: Ctx) {
   }
 
   const data: Prisma.TaskUpdateInput = {};
+
   if ("done" in body && typeof (body as { done: unknown }).done === "boolean") {
     data.done = (body as { done: boolean }).done;
+  }
+
+  if ("title" in body && typeof (body as { title: unknown }).title === "string") {
+    const title = (body as { title: string }).title.trim();
+    if (title.length === 0) {
+      return NextResponse.json(
+        { error: "Назва не може бути порожньою" },
+        { status: 400 }
+      );
+    }
+    if (title.length > 500) {
+      return NextResponse.json(
+        { error: "Назва занадто довга (макс 500 символів)" },
+        { status: 400 }
+      );
+    }
+    data.title = title;
   }
 
   if (Object.keys(data).length === 0) {

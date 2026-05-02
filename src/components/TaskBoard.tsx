@@ -8,6 +8,7 @@ import {
   type FilterValue,
   type SortValue,
 } from "./TaskControls";
+import { RecommendPanel } from "./RecommendPanel";
 import type { Task } from "@/lib/types";
 
 interface Props {
@@ -178,6 +179,28 @@ export function TaskBoard({ initial }: Props) {
     }
   }
 
+  async function handleEditTitle(id: string, title: string) {
+    setError(null);
+    const prev = tasks;
+    setTasks(tasks.map((t) => (t.id === id ? { ...t, title } : t)));
+    try {
+      const res = await fetch(`/api/tasks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Не вдалося оновити назву");
+      }
+      const updated: Task = await res.json();
+      setTasks((cur) => cur.map((t) => (t.id === id ? updated : t)));
+    } catch (e) {
+      setTasks(prev);
+      setError(e instanceof Error ? e.message : "Невідома помилка");
+    }
+  }
+
   const showAllDoneBanner =
     filter === "all" && counts.all > 0 && counts.active === 0;
 
@@ -211,6 +234,7 @@ export function TaskBoard({ initial }: Props) {
                   task={t}
                   onToggle={handleToggle}
                   onDelete={handleDelete}
+                  onEditTitle={handleEditTitle}
                 />
               ))}
             </Section>
@@ -223,6 +247,7 @@ export function TaskBoard({ initial }: Props) {
                   task={t}
                   onToggle={handleToggle}
                   onDelete={handleDelete}
+                  onEditTitle={handleEditTitle}
                 />
               ))}
             </Section>
@@ -239,6 +264,7 @@ export function TaskBoard({ initial }: Props) {
             task={t}
             onToggle={handleToggle}
             onDelete={handleDelete}
+            onEditTitle={handleEditTitle}
           />
         ))}
       </ul>
@@ -254,6 +280,8 @@ export function TaskBoard({ initial }: Props) {
           {error}
         </div>
       )}
+
+      <RecommendPanel disabled={counts.active === 0} />
 
       {counts.all > 0 && (
         <TaskControls
