@@ -65,6 +65,41 @@ export async function PATCH(req: Request, { params }: Ctx) {
     data.category = category;
   }
 
+  if (
+    "priority" in body &&
+    typeof (body as { priority: unknown }).priority === "string"
+  ) {
+    const priority = (body as { priority: string }).priority;
+    if (priority !== "high" && priority !== "medium" && priority !== "low") {
+      return NextResponse.json(
+        { error: "Невідомий пріоритет" },
+        { status: 400 }
+      );
+    }
+    data.priority = priority;
+  }
+
+  if ("deadline" in body) {
+    const v = (body as { deadline: unknown }).deadline;
+    if (v === null) {
+      data.deadline = null;
+    } else if (typeof v === "string" && v.length > 0) {
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) {
+        return NextResponse.json(
+          { error: "Невалідна дата" },
+          { status: 400 }
+        );
+      }
+      data.deadline = d;
+    } else {
+      return NextResponse.json(
+        { error: "Невалідна дата" },
+        { status: 400 }
+      );
+    }
+  }
+
   if (Object.keys(data).length === 0) {
     return NextResponse.json(
       { error: "Немає полів для оновлення" },

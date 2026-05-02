@@ -6,9 +6,11 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
-import type { Task } from "@/lib/types";
+import type { Comment, Task } from "@/lib/types";
 import { formatDeadline, formatRelative, isOverdue } from "@/lib/format";
 import { CATEGORIES, getCategory, type CategoryValue } from "@/lib/categories";
+
+type PriorityValue = "high" | "medium" | "low";
 
 interface Props {
   task: Task;
@@ -16,7 +18,14 @@ interface Props {
   onDelete: (id: string) => void;
   onEditTitle: (id: string, title: string) => Promise<void> | void;
   onEditCategory: (id: string, category: CategoryValue) => Promise<void> | void;
+  onEditPriority: (id: string, priority: PriorityValue) => Promise<void> | void;
+  onEditDeadline: (id: string, iso: string | null) => Promise<void> | void;
   onAddComment: (id: string, body: string) => Promise<void> | void;
+  onEditComment: (
+    taskId: string,
+    commentId: string,
+    body: string
+  ) => Promise<void> | void;
   onDeleteComment: (taskId: string, commentId: string) => Promise<void> | void;
 }
 
@@ -39,18 +48,51 @@ const PRIORITY_DOT: Record<string, string> = {
   low: "bg-[var(--color-priority-low)]",
 };
 
+const PRIORITY_OPTIONS: Array<{ value: PriorityValue; label: string }> = [
+  { value: "high", label: "Високий" },
+  { value: "medium", label: "Середній" },
+  { value: "low", label: "Низький" },
+];
+
+function pad(n: number): string {
+  return n.toString().padStart(2, "0");
+}
+
+function toInputValue(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function fromInputValue(s: string): string | null {
+  if (!s) return null;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function defaultDraftValue(): string {
+  const d = new Date();
+  d.setHours(23, 59, 0, 0);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function TaskCard({
   task,
   onToggle,
   onDelete,
   onEditTitle,
   onEditCategory,
+  onEditPriority,
+  onEditDeadline,
   onAddComment,
+  onEditComment,
   onDeleteComment,
 }: Props) {
-  const deadlineText = formatDeadline(task.deadline);
   const overdue = isOverdue(task.deadline, task.done);
-  const priorityKey = task.priority in PRIORITY_PILL ? task.priority : "medium";
+  const priorityKey = (
+    task.priority in PRIORITY_PILL ? task.priority : "medium"
+  ) as PriorityValue;
   const category = getCategory(task.category);
 
   const [editing, setEditing] = useState(false);
@@ -202,14 +244,10 @@ export function TaskCard({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 font-medium ${PRIORITY_PILL[priorityKey]}`}
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${PRIORITY_DOT[priorityKey]}`}
-              />
-              {PRIORITY_LABEL[priorityKey] ?? priorityKey}
-            </span>
+            <PriorityPill
+              value={priorityKey}
+              onChange={(v) => onEditPriority(task.id, v)}
+            />
 
             <CategoryPill
               value={category.value}
@@ -218,26 +256,11 @@ export function TaskCard({
               onChange={(v) => onEditCategory(task.id, v)}
             />
 
-            {deadlineText && (
-              <span
-                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-medium ${
-                  overdue
-                    ? "bg-[var(--color-priority-high-soft)] text-[var(--color-priority-high)]"
-                    : "bg-[var(--color-surface-muted)] text-[var(--color-foreground-muted)]"
-                }`}
-              >
-                <svg
-                  viewBox="0 0 16 16"
-                  className="h-3 w-3"
-                  fill="currentColor"
-                  aria-hidden
-                >
-                  <path d="M5 1a.75.75 0 0 1 .75.75V3h4.5V1.75a.75.75 0 0 1 1.5 0V3h.75A1.5 1.5 0 0 1 14 4.5V13a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 13V4.5A1.5 1.5 0 0 1 3.5 3h.75V1.75A.75.75 0 0 1 5 1Zm7.5 5h-9v7h9V6Z" />
-                </svg>
-                {deadlineText}
-                {overdue && <span>· прострочено</span>}
-              </span>
-            )}
+            <DeadlineEditor
+              iso={task.deadline}
+              overdue={overdue}
+              onChange={(v) => onEditDeadline(task.id, v)}
+            />
 
             {task.rawInput && task.rawInput !== task.title && (
               <span
@@ -308,34 +331,12 @@ export function TaskCard({
             {commentCount > 0 && (
               <ul className="flex flex-col gap-2">
                 {task.comments.map((c) => (
-                  <li
+                  <CommentItem
                     key={c.id}
-                    className="group/comment flex items-start gap-2 rounded-xl bg-[var(--color-surface-muted)] px-3 py-2"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="whitespace-pre-wrap break-words text-sm text-[var(--color-foreground)]">
-                        {c.body}
-                      </p>
-                      <p className="mt-0.5 text-[11px] text-[var(--color-muted)]">
-                        {formatRelative(c.createdAt)}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onDeleteComment(task.id, c.id)}
-                      aria-label="Видалити коментар"
-                      className="inline-flex h-6 w-6 flex-none items-center justify-center rounded-full text-[var(--color-muted)] opacity-0 transition hover:bg-[var(--color-priority-high-soft)] hover:text-[var(--color-danger)] focus-visible:opacity-100 group-hover/comment:opacity-100"
-                    >
-                      <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3">
-                        <path
-                          d="M4 4l8 8M12 4l-8 8"
-                          stroke="currentColor"
-                          strokeWidth="1.6"
-                          strokeLinecap="round"
-                        />
-                      </svg>
-                    </button>
-                  </li>
+                    comment={c}
+                    onEdit={(body) => onEditComment(task.id, c.id, body)}
+                    onDelete={() => onDeleteComment(task.id, c.id)}
+                  />
                 ))}
               </ul>
             )}
@@ -373,6 +374,46 @@ function pluralComments(n: number): string {
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14))
     return "коментарі";
   return "коментарів";
+}
+
+function PriorityPill({
+  value,
+  onChange,
+}: {
+  value: PriorityValue;
+  onChange: (v: PriorityValue) => void;
+}) {
+  return (
+    <span className="relative inline-flex items-center">
+      <span
+        className={`pointer-events-none inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 font-medium ${PRIORITY_PILL[value]}`}
+      >
+        <span className={`h-1.5 w-1.5 rounded-full ${PRIORITY_DOT[value]}`} />
+        {PRIORITY_LABEL[value] ?? value}
+        <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3" aria-hidden>
+          <path
+            d="M4 6l4 4 4-4"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as PriorityValue)}
+        aria-label="Пріоритет"
+        className="absolute inset-0 cursor-pointer opacity-0"
+      >
+        {PRIORITY_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
 }
 
 function CategoryPill({
@@ -414,5 +455,251 @@ function CategoryPill({
         ))}
       </select>
     </span>
+  );
+}
+
+function DeadlineEditor({
+  iso,
+  overdue,
+  onChange,
+}: {
+  iso: string | null;
+  overdue: boolean;
+  onChange: (iso: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<string>(() => toInputValue(iso));
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!editing) setDraft(toInputValue(iso));
+  }, [iso, editing]);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [editing]);
+
+  function start() {
+    setDraft(iso ? toInputValue(iso) : defaultDraftValue());
+    setEditing(true);
+  }
+
+  function save() {
+    if (!draft) {
+      setEditing(false);
+      return;
+    }
+    const next = fromInputValue(draft);
+    if (next === null) {
+      setEditing(false);
+      return;
+    }
+    setEditing(false);
+    void onChange(next);
+  }
+
+  function clear() {
+    setEditing(false);
+    void onChange(null);
+  }
+
+  function cancel() {
+    setEditing(false);
+    setDraft(toInputValue(iso));
+  }
+
+  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      save();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancel();
+    }
+  }
+
+  if (editing) {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1">
+        <input
+          ref={inputRef}
+          type="datetime-local"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={handleKeyDown}
+          className="rounded-full border border-[var(--color-accent)] bg-[var(--color-surface)] px-2 py-0.5 text-xs font-medium text-[var(--color-foreground)] outline-none ring-2 ring-[var(--color-accent)]/20"
+        />
+        <button
+          type="button"
+          onClick={save}
+          className="inline-flex items-center rounded-full bg-[var(--color-accent)] px-2.5 py-0.5 text-xs font-semibold text-[var(--color-accent-foreground)] transition hover:bg-[var(--color-accent-hover)]"
+        >
+          Зберегти
+        </button>
+        <button
+          type="button"
+          onClick={cancel}
+          className="inline-flex items-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-foreground-muted)] transition hover:border-[var(--color-border-strong)]"
+        >
+          Скасувати
+        </button>
+        {iso && (
+          <button
+            type="button"
+            onClick={clear}
+            className="inline-flex items-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-danger)] transition hover:bg-[var(--color-priority-high-soft)]"
+          >
+            × Прибрати
+          </button>
+        )}
+      </span>
+    );
+  }
+
+  if (!iso) {
+    return (
+      <button
+        type="button"
+        onClick={start}
+        className="inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--color-border-strong)] bg-transparent px-2.5 py-0.5 font-medium text-[var(--color-foreground-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+      >
+        <svg viewBox="0 0 16 16" className="h-3 w-3" fill="currentColor" aria-hidden>
+          <path d="M5 1a.75.75 0 0 1 .75.75V3h4.5V1.75a.75.75 0 0 1 1.5 0V3h.75A1.5 1.5 0 0 1 14 4.5V13a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 13V4.5A1.5 1.5 0 0 1 3.5 3h.75V1.75A.75.75 0 0 1 5 1Zm7.5 5h-9v7h9V6Z" />
+        </svg>
+        + Дедлайн
+      </button>
+    );
+  }
+
+  const deadlineText = formatDeadline(iso);
+  return (
+    <button
+      type="button"
+      onClick={start}
+      title="Натисни щоб змінити дедлайн"
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-medium transition ${
+        overdue
+          ? "bg-[var(--color-priority-high-soft)] text-[var(--color-priority-high)] hover:brightness-95"
+          : "bg-[var(--color-surface-muted)] text-[var(--color-foreground-muted)] hover:bg-[var(--color-surface-grey)]"
+      }`}
+    >
+      <svg
+        viewBox="0 0 16 16"
+        className="h-3 w-3"
+        fill="currentColor"
+        aria-hidden
+      >
+        <path d="M5 1a.75.75 0 0 1 .75.75V3h4.5V1.75a.75.75 0 0 1 1.5 0V3h.75A1.5 1.5 0 0 1 14 4.5V13a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 13V4.5A1.5 1.5 0 0 1 3.5 3h.75V1.75A.75.75 0 0 1 5 1Zm7.5 5h-9v7h9V6Z" />
+      </svg>
+      {deadlineText}
+      {overdue && <span>· прострочено</span>}
+    </button>
+  );
+}
+
+function CommentItem({
+  comment,
+  onEdit,
+  onDelete,
+}: {
+  comment: Comment;
+  onEdit: (body: string) => Promise<void> | void;
+  onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(comment.body);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!editing) setDraft(comment.body);
+  }, [comment.body, editing]);
+
+  useEffect(() => {
+    if (editing && taRef.current) {
+      const ta = taRef.current;
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    }
+  }, [editing]);
+
+  function commit() {
+    const next = draft.trim();
+    if (!next) {
+      setEditing(false);
+      setDraft(comment.body);
+      return;
+    }
+    if (next === comment.body) {
+      setEditing(false);
+      return;
+    }
+    setEditing(false);
+    void onEdit(next);
+  }
+
+  function cancel() {
+    setEditing(false);
+    setDraft(comment.body);
+  }
+
+  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      commit();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancel();
+    }
+  }
+
+  return (
+    <li className="group/comment flex items-start gap-2 rounded-xl bg-[var(--color-surface-muted)] px-3 py-2">
+      <div className="min-w-0 flex-1">
+        {editing ? (
+          <textarea
+            ref={taRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={commit}
+            rows={Math.max(2, draft.split("\n").length)}
+            maxLength={2000}
+            className="w-full resize-y rounded-lg border border-[var(--color-accent)] bg-[var(--color-surface)] px-2 py-1 text-sm text-[var(--color-foreground)] outline-none ring-2 ring-[var(--color-accent)]/20"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            title="Натисни щоб редагувати"
+            className="block w-full whitespace-pre-wrap break-words text-left text-sm text-[var(--color-foreground)] transition hover:text-[var(--color-accent)]"
+          >
+            {comment.body}
+          </button>
+        )}
+        <p className="mt-0.5 text-[11px] text-[var(--color-muted)]">
+          {formatRelative(comment.createdAt)}
+          {editing && " · Cmd/Ctrl+Enter — зберегти, Esc — скасувати"}
+        </p>
+      </div>
+      {!editing && (
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label="Видалити коментар"
+          className="inline-flex h-6 w-6 flex-none items-center justify-center rounded-full text-[var(--color-muted)] opacity-0 transition hover:bg-[var(--color-priority-high-soft)] hover:text-[var(--color-danger)] focus-visible:opacity-100 group-hover/comment:opacity-100"
+        >
+          <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3">
+            <path
+              d="M4 4l8 8M12 4l-8 8"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      )}
+    </li>
   );
 }

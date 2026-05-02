@@ -22,6 +22,9 @@ const PRIORITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
 const FILTER_KEY = "tt:filter";
 const SORT_KEY = "tt:sort";
 const CATEGORY_KEY = "tt:cat";
+const CONTROLS_KEY = "tt:controls";
+
+type PriorityValue = "high" | "medium" | "low";
 
 const FILTER_VALUES: ReadonlyArray<FilterValue> = ["all", "active", "done"];
 const SORT_VALUES: ReadonlyArray<SortValue> = [
@@ -113,6 +116,7 @@ export function TaskBoard({ initial }: Props) {
   const [filter, setFilter] = useState<FilterValue>("all");
   const [sort, setSort] = useState<SortValue>("smart");
   const [category, setCategory] = useState<CategoryFilter>("all");
+  const [controlsOpen, setControlsOpen] = useState<boolean>(true);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -122,6 +126,9 @@ export function TaskBoard({ initial }: Props) {
     if (isSort(s)) setSort(s);
     const c = window.localStorage.getItem(CATEGORY_KEY);
     if (isCategoryFilter(c)) setCategory(c);
+    const co = window.localStorage.getItem(CONTROLS_KEY);
+    if (co === "closed") setControlsOpen(false);
+    else if (co === "open") setControlsOpen(true);
   }, []);
 
   useEffect(() => {
@@ -138,6 +145,11 @@ export function TaskBoard({ initial }: Props) {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(CATEGORY_KEY, category);
   }, [category]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(CONTROLS_KEY, controlsOpen ? "open" : "closed");
+  }, [controlsOpen]);
 
   const counts = useMemo(() => {
     let active = 0;
@@ -271,6 +283,54 @@ export function TaskBoard({ initial }: Props) {
     }
   }
 
+  async function handleEditPriority(id: string, next: PriorityValue) {
+    setError(null);
+    const prev = tasks;
+    setTasks(tasks.map((t) => (t.id === id ? { ...t, priority: next } : t)));
+    try {
+      const res = await fetch(`/api/tasks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priority: next }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Не вдалося змінити пріоритет");
+      }
+    } catch (e) {
+      setTasks(prev);
+      setError(e instanceof Error ? e.message : "Невідома помилка");
+    }
+  }
+
+  async function handleEditDeadline(id: string, iso: string | null) {
+    setError(null);
+    const prev = tasks;
+    setTasks(tasks.map((t) => (t.id === id ? { ...t, deadline: iso } : t)));
+    try {
+      const res = await fetch(`/api/tasks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deadline: iso }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Не вдалося змінити дедлайн");
+      }
+      const updated: Task = await res.json();
+      setTasks((cur) =>
+        cur.map((t) =>
+          t.id === id
+            ? { ...updated, comments: updated.comments ?? t.comments }
+            : t
+        )
+      );
+    } catch (e) {
+      setTasks(prev);
+      setError(e instanceof Error ? e.message : "Невідома помилка");
+    }
+  }
+
   async function handleAddComment(taskId: string, body: string) {
     setError(null);
     const tempId = `tmp-${Math.random().toString(36).slice(2)}`;
@@ -304,6 +364,57 @@ export function TaskBoard({ initial }: Props) {
                 ...t,
                 comments: t.comments.map((c) =>
                   c.id === tempId ? created : c
+                ),
+              }
+            : t
+        )
+      );
+    } catch (e) {
+      setTasks(prev);
+      setError(e instanceof Error ? e.message : "Невідома помилка");
+    }
+  }
+
+  async function handleEditComment(
+    taskId: string,
+    commentId: string,
+    body: string
+  ) {
+    setError(null);
+    const prev = tasks;
+    setTasks(
+      tasks.map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              comments: t.comments.map((c) =>
+                c.id === commentId ? { ...c, body } : c
+              ),
+            }
+          : t
+      )
+    );
+    try {
+      const res = await fetch(
+        `/api/tasks/${taskId}/comments/${commentId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body }),
+        }
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Не вдалося оновити коментар");
+      }
+      const updated: Comment = await res.json();
+      setTasks((cur) =>
+        cur.map((t) =>
+          t.id === taskId
+            ? {
+                ...t,
+                comments: t.comments.map((c) =>
+                  c.id === commentId ? updated : c
                 ),
               }
             : t
@@ -383,7 +494,10 @@ export function TaskBoard({ initial }: Props) {
                   onDelete={handleDelete}
                   onEditTitle={handleEditTitle}
                   onEditCategory={handleEditCategory}
+                  onEditPriority={handleEditPriority}
+                  onEditDeadline={handleEditDeadline}
                   onAddComment={handleAddComment}
+                  onEditComment={handleEditComment}
                   onDeleteComment={handleDeleteComment}
                 />
               ))}
@@ -399,7 +513,10 @@ export function TaskBoard({ initial }: Props) {
                   onDelete={handleDelete}
                   onEditTitle={handleEditTitle}
                   onEditCategory={handleEditCategory}
+                  onEditPriority={handleEditPriority}
+                  onEditDeadline={handleEditDeadline}
                   onAddComment={handleAddComment}
+                  onEditComment={handleEditComment}
                   onDeleteComment={handleDeleteComment}
                 />
               ))}
@@ -419,7 +536,10 @@ export function TaskBoard({ initial }: Props) {
             onDelete={handleDelete}
             onEditTitle={handleEditTitle}
             onEditCategory={handleEditCategory}
+            onEditPriority={handleEditPriority}
+            onEditDeadline={handleEditDeadline}
             onAddComment={handleAddComment}
+            onEditComment={handleEditComment}
             onDeleteComment={handleDeleteComment}
           />
         ))}
@@ -444,11 +564,13 @@ export function TaskBoard({ initial }: Props) {
           filter={filter}
           sort={sort}
           category={category}
+          collapsed={!controlsOpen}
           counts={counts}
           categoryCounts={categoryCounts}
           onFilterChange={setFilter}
           onSortChange={setSort}
           onCategoryChange={setCategory}
+          onToggleCollapsed={() => setControlsOpen((v) => !v)}
         />
       )}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { CATEGORIES, type CategoryValue } from "@/lib/categories";
+import { CATEGORIES, getCategory, type CategoryValue } from "@/lib/categories";
 
 export type FilterValue = "all" | "active" | "done";
 export type SortValue = "smart" | "deadline" | "priority" | "newest";
@@ -10,11 +10,13 @@ interface Props {
   filter: FilterValue;
   sort: SortValue;
   category: CategoryFilter;
+  collapsed: boolean;
   counts: { all: number; active: number; done: number };
   categoryCounts: Record<CategoryValue, number>;
   onFilterChange: (v: FilterValue) => void;
   onSortChange: (v: SortValue) => void;
   onCategoryChange: (v: CategoryFilter) => void;
+  onToggleCollapsed: () => void;
 }
 
 const FILTER_OPTIONS: Array<{ value: FilterValue; label: string; key: keyof Props["counts"] }> = [
@@ -30,18 +32,100 @@ const SORT_OPTIONS: Array<{ value: SortValue; label: string }> = [
   { value: "newest", label: "Нещодавні" },
 ];
 
+const FILTER_LABEL: Record<FilterValue, string> = {
+  all: "Усі",
+  active: "Активні",
+  done: "Виконано",
+};
+
+const SORT_LABEL: Record<SortValue, string> = {
+  smart: "Розумно",
+  deadline: "За дедлайном",
+  priority: "За пріоритетом",
+  newest: "Нещодавні",
+};
+
 export function TaskControls({
   filter,
   sort,
   category,
+  collapsed,
   counts,
   categoryCounts,
   onFilterChange,
   onSortChange,
   onCategoryChange,
+  onToggleCollapsed,
 }: Props) {
+  if (collapsed) {
+    const categoryLabel =
+      category === "all" ? "Усі категорії" : (() => {
+        const c = getCategory(category);
+        return `${c.emoji} ${c.label}`;
+      })();
+    return (
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        aria-expanded={false}
+        className="flex w-full items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-sm text-[var(--color-foreground-muted)] shadow-[var(--shadow-soft)] transition hover:border-[var(--color-border-strong)]"
+      >
+        <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 flex-none" aria-hidden>
+          <path
+            d="M3 4h10M5 8h6M7 12h2"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </svg>
+        <span className="min-w-0 truncate font-medium text-[var(--color-foreground)]">
+          {FILTER_LABEL[filter]}
+        </span>
+        <span className="text-[var(--color-muted)]">·</span>
+        <span className="min-w-0 truncate">{categoryLabel}</span>
+        <span className="text-[var(--color-muted)]">·</span>
+        <span className="min-w-0 truncate">{SORT_LABEL[sort]}</span>
+        <span className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-[var(--color-accent)]">
+          Налаштування
+          <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3" aria-hidden>
+            <path
+              d="M4 6l4 4 4-4"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+      </button>
+    );
+  }
+
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-[var(--shadow-soft)]">
+      <div className="flex items-center justify-between gap-2 px-1">
+        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-foreground-muted)]">
+          Налаштування
+        </span>
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-expanded={true}
+          className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-[var(--color-foreground-muted)] transition hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-foreground)]"
+        >
+          Згорнути
+          <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3" aria-hidden>
+            <path
+              d="M4 10l4-4 4 4"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div
           role="tablist"
