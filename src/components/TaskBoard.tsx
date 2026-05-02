@@ -10,11 +10,15 @@ import {
   type SortValue,
 } from "./TaskControls";
 import { DigestPanel } from "./DigestPanel";
+import { PaywallDialog } from "./PaywallDialog";
 import { CATEGORIES, type CategoryValue } from "@/lib/categories";
 import type { Comment, Task } from "@/lib/types";
 
+const FREE_TASK_LIMIT = 10;
+
 interface Props {
   initial: Task[];
+  isPro?: boolean;
 }
 
 const PRIORITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
@@ -110,13 +114,14 @@ function sortTasks(tasks: Task[], sort: SortValue): Task[] {
   return [...tasks].sort(cmp);
 }
 
-export function TaskBoard({ initial }: Props) {
+export function TaskBoard({ initial, isPro = false }: Props) {
   const [tasks, setTasks] = useState<Task[]>(initial);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterValue>("all");
   const [sort, setSort] = useState<SortValue>("smart");
   const [category, setCategory] = useState<CategoryFilter>("all");
   const [controlsOpen, setControlsOpen] = useState<boolean>(true);
+  const [paywallOpen, setPaywallOpen] = useState<boolean>(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -185,15 +190,23 @@ export function TaskBoard({ initial }: Props) {
 
   async function handleAdd(rawInput: string) {
     setError(null);
+    if (!isPro && tasks.length >= FREE_TASK_LIMIT) {
+      setPaywallOpen(true);
+      return;
+    }
     try {
       const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rawInput }),
       });
+      if (res.status === 402) {
+        setPaywallOpen(true);
+        return;
+      }
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Не вдалося додати задачу");
+        throw new Error(data.message || data.error || "Не вдалося додати задачу");
       }
       const newTask: Task = await res.json();
       setTasks((prev) => [
@@ -547,6 +560,9 @@ export function TaskBoard({ initial }: Props) {
     );
   }
 
+  const showFreeBanner = !isPro && tasks.length >= 8;
+  const remaining = Math.max(0, FREE_TASK_LIMIT - tasks.length);
+
   return (
     <div className="flex flex-col gap-6">
       <TaskInput onSubmit={handleAdd} />
@@ -556,6 +572,21 @@ export function TaskBoard({ initial }: Props) {
           {error}
         </div>
       )}
+
+      {showFreeBanner && (
+        <FreePlanBanner
+          used={Math.min(tasks.length, FREE_TASK_LIMIT)}
+          total={FREE_TASK_LIMIT}
+          remaining={remaining}
+        />
+      )}
+
+      <PaywallDialog
+        open={paywallOpen}
+        onClose={() => setPaywallOpen(false)}
+        limit={FREE_TASK_LIMIT}
+      />
+
 
       <DigestPanel disabled={counts.active === 0} />
 
@@ -677,6 +708,58 @@ function AllDoneBanner() {
           Активних задач немає. Додай нову — або просто видихни.
         </p>
       </div>
+    </div>
+  );
+}
+
+function FreePlanBanner({
+  used,
+  total,
+  remaining,
+}: {
+  used: number;
+  total: number;
+  remaining: number;
+}) {
+  const atLimit = remaining === 0;
+  return (
+    <div
+      className={`flex flex-col gap-3 rounded-2xl border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${
+        atLimit
+          ? "border-[color-mix(in_oklab,var(--color-danger)_25%,transparent)] bg-[var(--color-priority-high-soft)]"
+          : "border-[var(--color-border)] bg-[var(--color-accent-soft)]"
+      }`}
+    >
+      <div className="flex items-start gap-2.5">
+        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--color-accent)] text-[var(--color-accent-foreground)]">
+          <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden>
+            <path
+              d="M12 2l2.39 6.95H22l-6.2 4.5 2.39 6.95L12 16.9 5.81 20.4 8.2 13.45 2 8.95h7.61L12 2z"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+        <div>
+          <p className="font-semibold text-[var(--color-foreground)]">
+            {atLimit
+              ? "Ліміт досягнуто"
+              : `Залишилось ${remaining} з ${total} задач`}
+          </p>
+          <p className="text-[var(--color-foreground-muted)]">
+            {atLimit
+              ? `Оформи Pro, щоб додавати нові задачі без обмежень.`
+              : `Ти використав ${used} з ${total} на безкоштовному плані.`}
+          </p>
+        </div>
+      </div>
+      <a
+        href="/upgrade"
+        className="inline-flex h-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] px-4 text-sm font-semibold text-[var(--color-accent-foreground)] shadow-[var(--shadow-cta)] transition hover:bg-[var(--color-accent-hover)]"
+      >
+        Оформити Pro
+      </a>
     </div>
   );
 }

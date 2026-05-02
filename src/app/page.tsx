@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { getUserPlan, isProActive } from "@/lib/plan";
 import { TaskBoard } from "@/components/TaskBoard";
 import { UserMenu } from "@/components/UserMenu";
 import type { Task } from "@/lib/types";
@@ -37,7 +38,11 @@ async function loadTasks(userId: string): Promise<Task[]> {
 
 export default async function Home() {
   const user = await requireUser();
-  const tasks = await loadTasks(user.id);
+  const [tasks, planStatus] = await Promise.all([
+    loadTasks(user.id),
+    getUserPlan(user.id),
+  ]);
+  const isPro = isProActive(planStatus);
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-10 px-4 py-10 sm:py-16">
@@ -59,7 +64,7 @@ export default async function Home() {
         </p>
       </header>
 
-      <TaskBoard initial={tasks} />
+      <TaskBoard initial={tasks} isPro={isPro} />
 
       <footer className="mt-auto pt-6 text-center text-xs text-[var(--color-muted)]">
         Збережено в Neon Postgres · Парсинг через OpenAI

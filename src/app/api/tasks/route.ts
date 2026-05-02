@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { parseTask } from "@/lib/parseTask";
 import { requireApiUser } from "@/lib/session";
+import { FREE_TASK_LIMIT, getUserPlan, isProActive } from "@/lib/plan";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,6 +66,22 @@ export async function POST(req: Request) {
   }
 
   try {
+    const planStatus = await getUserPlan(auth.user.id);
+    if (!isProActive(planStatus)) {
+      const count = await prisma.task.count({
+        where: { userId: auth.user.id },
+      });
+      if (count >= FREE_TASK_LIMIT) {
+        return NextResponse.json(
+          {
+            error: "LIMIT_REACHED",
+            message: `Досягнуто ліміт безкоштовного плану (${FREE_TASK_LIMIT} задач). Оформи Pro, щоб продовжити.`,
+          },
+          { status: 402 }
+        );
+      }
+    }
+
     const parsed = await parseTask(rawInput);
 
     const task = await prisma.task.create({
